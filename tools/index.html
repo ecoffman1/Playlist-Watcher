@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="strict-origin-when-cross-origin"> <!-- Critical for resolving Error 153 -->
+    <title>YouTube Playlist Resume Tracker</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #121212;
+            color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            background-color: #1e1e1e;
+            color: #fff;
+            font-size: 1rem;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #ff0000;
+        }
+        button {
+            padding: 12px 20px;
+            border-radius: 6px;
+            border: none;
+            background-color: #ff0000;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #cc0000;
+        }
+        #player-wrapper {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            height: 0;
+            overflow: hidden;
+            background: #000;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            display: none; 
+        }
+        #player-wrapper iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+        .saved-section {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #292929;
+        }
+        h2 {
+            font-size: 1.3rem;
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 8px;
+        }
+        .playlist-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .playlist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #2d2d2d;
+        }
+        .playlist-item:last-child {
+            border-bottom: none;
+        }
+        .playlist-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .playlist-id {
+            font-weight: bold;
+            color: #fff;
+            word-break: break-all;
+        }
+        .playlist-progress {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .item-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-secondary {
+            background-color: #333;
+        }
+        .btn-secondary:hover {
+            background-color: #444;
+        }
+        .btn-danger {
+            background-color: #4b1a1a;
+            color: #ff6b6b;
+        }
+        .btn-danger:hover {
+            background-color: #722020;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>YouTube Playlist Resume Tracker</h1>
+    
+    <div class="input-group">
+        <input type="text" id="playlist-input" placeholder="Paste YouTube Playlist URL or Playlist ID">
+        <button id="load-btn">Load</button>
+    </div>
+
+    <div id="player-wrapper">
+        <div id="player"></div>
+    </div>
+
+    <div class="saved-section">
+        <h2>Your Saved Playlists</h2>
+        <ul id="playlist-list" class="playlist-list"></ul>
+    </div>
+</div>
+
+<script>
+    // Load the YouTube IFrame API asynchronously
+    const tag = document.createElement('script');
+    tag.src = "https://www.youtube.com/iframe_api";
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+    let player;
+    let currentPlaylistId = null;
+    let trackerInterval = null;
+
+    // Helper to extract the Playlist ID from a URL
+    function getPlaylistId(input) {
+        try {
+            const url = new URL(input);
+            return url.searchParams.get('list') || input;
+        } catch (e) {
+            return input.trim();
+        }
+    }
+
+    // Automatically called by the YouTube Iframe library when loaded
+    function onYouTubeIframeAPIReady() {
+        renderPlaylistList();
+        
+        document.getElementById('load-btn').addEventListener('click', () => {
+            const val = document.getElementById('playlist-input').value;
+            if (val) {
+                const id = getPlaylistId(val);
+                launchPlaylist(id, 0, 0);
+            }
+        });
+    }
+
+    function launchPlaylist(playlistId, savedIndex = 0, savedSeconds = 0) {
+        currentPlaylistId = playlistId;
+        clearInterval(trackerInterval);
+
+        // Display player container
+        const wrapper = document.getElementById('player-wrapper');
+        wrapper.style.display = 'block';
+
+        // Destroy any active player instance to rebuild it safely
+        if (player) {
+            player.destroy();
+        }
+
+        player = new YT.Player('player', {
+            host: 'https://www.youtube-nocookie.com', // Fixes Error 153 for most browser configurations
+            playerVars: {
+                enablejsapi: 1,
+                autoplay: 1 
+            },
+            events: {
+                'onReady': (event) => {
+                    // Load the playlist starting from our saved index and time
+                    event.target.loadPlaylist({
+                        list: playlistId,
+                        index: savedIndex,
+                        startSeconds: savedSeconds
+                    });
+                    
+                    // Periodically poll the player to record the progress
+                    trackerInterval = setInterval(saveCurrentProgress, 2500);
+                },
+                'onStateChange': () => {
+                    saveCurrentProgress();
+                }
+            }
+        });
+    }
+
+    function saveCurrentProgress() {
+        if (!player || typeof player.getPlaylistIndex !== 'function') return;
+
+        try {
+            const index = player.getPlaylistIndex();
+            const seconds = Math.floor(player.getCurrentTime());
+
+            // Validate values before writing to storage
+            if (index !== null && index >= 0 && !isNaN(index)) {
+                let savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+                savedData[currentPlaylistId] = {
+                    index: index,
+                    seconds: seconds,
+                    updatedAt: Date.now()
+                };
+                localStorage.setItem('yt_playlist_resume', JSON.stringify(savedData));
+                renderPlaylistList();
+            }
+        } catch (e) {
+            console.error("Progress saving failed:", e);
+        }
+    }
+
+    function renderPlaylistList() {
+        const listEl = document.getElementById('playlist-list');
+        listEl.innerHTML = '';
+        
+        const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+        const keys = Object.keys(savedData).sort((a,b) => savedData[b].updatedAt - savedData[a].updatedAt);
+
+        if (keys.length === 0) {
+            listEl.innerHTML = '<li style="color: #666; text-align: center; padding: 15px;">No saved playlists yet</li>';
+            return;
+        }
+
+        keys.forEach(id => {
+            const item = savedData[id];
+            
+            const li = document.createElement('li');
+            li.className = 'playlist-item';
+            
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'playlist-info';
+            
+            const idSpan = document.createElement('span');
+            idSpan.className = 'playlist-id';
+            idSpan.innerText = `Playlist ID: ${id}`;
+            
+            const progressSpan = document.createElement('span');
+            progressSpan.className = 'playlist-progress';
+            progressSpan.innerText = `Last watched: Video #${item.index + 1} at ${formatTime(item.seconds)}`;
+            
+            infoDiv.appendChild(idSpan);
+            infoDiv.appendChild(progressSpan);
+            
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'item-actions';
+            
+            const resumeBtn = document.createElement('button');
+            resumeBtn.className = 'btn-secondary';
+            resumeBtn.innerText = 'Resume';
+            resumeBtn.onclick = () => launchPlaylist(id, item.index, item.seconds);
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn-danger';
+            deleteBtn.innerText = 'Delete';
+            deleteBtn.onclick = () => {
+                delete savedData[id];
+                localStorage.setItem('yt_playlist_resume', JSON.stringify(savedData));
+                renderPlaylistList();
+            };
+            
+            actionsDiv.appendChild(resumeBtn);
+            actionsDiv.appendChild(deleteBtn);
+            
+            li.appendChild(infoDiv);
+            li.appendChild(actionsDiv);
+            listEl.appendChild(li);
+        });
+    }
+
+    function formatTime(totalSeconds) {
+        if (isNaN(totalSeconds) || totalSeconds < 0) return '0:00';
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+</script>
+</body>
+</html>
