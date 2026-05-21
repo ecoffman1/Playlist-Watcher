@@ -252,7 +252,7 @@
         </div>
         
         <div id="sidebar" class="sidebar">
-            <h2>Playlist Videos</h2>
+            <h2 id="sidebar-title">Playlist Videos</h2>
             <ul id="sidebar-list"></ul>
         </div>
     </div>
@@ -335,6 +335,10 @@
                 }
                 localStorage.setItem('yt_playlist_resume', JSON.stringify(savedData));
                 renderPlaylistList();
+                if (playlistId === currentPlaylistId) {
+                    const sidebarTitle = document.getElementById('sidebar-title');
+                    if (sidebarTitle) sidebarTitle.innerText = data.title;
+                }
             }
         } catch (e) {
             console.error("Error fetching playlist title:", e);
@@ -433,6 +437,10 @@
         const sidebarList = document.getElementById('sidebar-list');
         sidebar.style.display = 'block';
         sidebarList.innerHTML = '';
+
+        const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+        const playlistTitle = savedData[currentPlaylistId]?.title;
+        document.getElementById('sidebar-title').innerText = playlistTitle || 'Playlist Videos';
         
         const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
         const watchedList = (savedData[currentPlaylistId] && savedData[currentPlaylistId].watched) || [];
@@ -596,14 +604,7 @@
             
             infoDiv.appendChild(titleSpan);
 
-            // If the title exists, render the ID in a smaller font beneath it
-            if (item.title) {
-                const subSpan = document.createElement('span');
-                subSpan.className = 'playlist-id-sub';
-                subSpan.innerText = `ID: ${id}`;
-                infoDiv.appendChild(subSpan);
-            }
-            
+
             const totalStr = item.totalVideos ? ` of ${item.totalVideos}` : '';
             const watchedCount = item.watched ? item.watched.length : 0;
             const watchedStr = item.totalVideos ? ` (${watchedCount} watched)` : '';
