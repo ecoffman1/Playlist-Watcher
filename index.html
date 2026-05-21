@@ -441,8 +441,6 @@
         const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
         const playlistTitle = savedData[currentPlaylistId]?.title;
         document.getElementById('sidebar-title').innerText = playlistTitle || 'Playlist Videos';
-        
-        const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
         const watchedList = (savedData[currentPlaylistId] && savedData[currentPlaylistId].watched) || [];
         
         playlistVideos.forEach((videoId, index) => {
