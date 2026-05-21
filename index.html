@@ -241,6 +241,7 @@
     
     <div class="input-group">
         <input type="text" id="playlist-input" placeholder="Paste YouTube Playlist URL or Playlist ID">
+        <input type="text" id="name-input" placeholder="Name (optional)" style="max-width:200px;flex-grow:0;">
         <button id="load-btn">Load</button>
     </div>
 
@@ -299,9 +300,10 @@
         
         document.getElementById('load-btn').addEventListener('click', () => {
             const val = document.getElementById('playlist-input').value;
+            const name = document.getElementById('name-input').value.trim();
             if (val) {
                 const id = getPlaylistId(val);
-                launchPlaylist(id, 0, 0);
+                launchPlaylist(id, 0, 0, name || null);
             }
         });
     }
@@ -310,39 +312,52 @@
     function fetchMissingPlaylistTitles() {
         const savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
         Object.keys(savedData).forEach(id => {
-            if (!savedData[id].title) {
+            if (!savedData[id].title || savedData[id].title.startsWith('Playlist ID:')) {
                 fetchAndSavePlaylistTitle(id);
             }
         });
     }
 
     async function fetchAndSavePlaylistTitle(playlistId) {
-        let title = null;
-
-        // noembed doesn't support playlist URLs, so try Piped API first
-        try {
-            const r = await fetch(`https://pipedapi.kavin.rocks/playlists/${playlistId}`);
-            if (r.ok) {
+        const sources = [
+            async () => {
+                const r = await fetch(`https://pipedapi.kavin.rocks/playlists/${playlistId}`);
+                if (!r.ok) throw new Error();
                 const d = await r.json();
-                if (d && d.name) title = d.name;
-            }
-        } catch (e) {}
-
-        // Fallback: noembed with a properly encoded URL
-        if (!title) {
-            try {
+                return d.name || null;
+            },
+            async () => {
+                const r = await fetch(`https://inv.riverside.rocks/api/v1/playlists/${playlistId}?fields=title`);
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                return d.title || null;
+            },
+            async () => {
+                const r = await fetch(`https://invidious.fdn.fr/api/v1/playlists/${playlistId}?fields=title`);
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                return d.title || null;
+            },
+            async () => {
                 const encoded = encodeURIComponent(`https://www.youtube.com/playlist?list=${playlistId}`);
                 const r = await fetch(`https://noembed.com/embed?url=${encoded}`);
-                if (r.ok) {
-                    const d = await r.json();
-                    if (d && d.title) title = d.title;
-                }
-            } catch (e) {}
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                return d.title || null;
+            }
+        ];
+
+        let title = null;
+        for (const fn of sources) {
+            try { title = await fn(); } catch (e) {}
+            if (title) break;
         }
 
         if (!title) return;
 
         let savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+        // Don't overwrite a name the user already set manually
+        if (savedData[playlistId] && savedData[playlistId].title) return;
         if (savedData[playlistId]) {
             savedData[playlistId].title = title;
         } else {
@@ -356,10 +371,20 @@
         }
     }
 
-    function launchPlaylist(playlistId, savedIndex = 0, savedSeconds = 0) {
+    function launchPlaylist(playlistId, savedIndex = 0, savedSeconds = 0, manualName = null) {
         currentPlaylistId = playlistId;
         clearInterval(trackerInterval);
-        isSidebarRendered = false; // Reset the rendering flag for the new playlist
+        isSidebarRendered = false;
+
+        // Save a manual name immediately so it shows up right away
+        if (manualName) {
+            let savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+            if (!savedData[playlistId]) savedData[playlistId] = { index: 0, seconds: 0, updatedAt: Date.now(), watched: [] };
+            savedData[playlistId].title = manualName;
+            localStorage.setItem('yt_playlist_resume', JSON.stringify(savedData));
+            renderPlaylistList();
+            document.getElementById('sidebar-title').innerText = manualName;
+        }
 
         // Display player container
         const wrapper = document.getElementById('player-wrapper');
@@ -641,13 +666,35 @@
                 renderPlaylistList();
             };
             
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'btn-secondary';
+            renameBtn.style.cssText = 'font-size:0.8rem;padding:8px 12px;';
+            renameBtn.innerText = 'Rename';
+            renameBtn.onclick = () => renamePlaylist(id, item.title);
+
             actionsDiv.appendChild(resumeBtn);
+            actionsDiv.appendChild(renameBtn);
             actionsDiv.appendChild(deleteBtn);
             
             li.appendChild(infoDiv);
             li.appendChild(actionsDiv);
             listEl.appendChild(li);
         });
+    }
+
+    function renamePlaylist(id, currentTitle) {
+        const newName = prompt('Playlist name:', currentTitle || '');
+        if (newName !== null && newName.trim()) {
+            let savedData = JSON.parse(localStorage.getItem('yt_playlist_resume')) || {};
+            if (savedData[id]) {
+                savedData[id].title = newName.trim();
+                localStorage.setItem('yt_playlist_resume', JSON.stringify(savedData));
+                renderPlaylistList();
+                if (id === currentPlaylistId) {
+                    document.getElementById('sidebar-title').innerText = newName.trim();
+                }
+            }
+        }
     }
 
     function formatTime(totalSeconds) {
